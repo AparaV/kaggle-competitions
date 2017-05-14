@@ -9,30 +9,40 @@ from sklearn.ensemble import RandomForestClassifier
 from sklearn.metrics import make_scorer, accuracy_score
 from sklearn.model_selection import GridSearchCV
 from sklearn.cross_validation import KFold
+from sklearn import svm
 
 
-# Create bins for ages
+# Create bins for ages - replace NaN with average value
 def simplify_ages(df):
-    df.Age = df.Age.fillna(-0.5)
-    bins = (-1, 0, 5, 12, 18, 25, 35, 60, 120)
-    group_names = ['Unknown', 'Baby', 'Child', 'Teenager', 'Student', 'Young Adult', 'Adult', 'Senior']
+    df.Age = df.Age.fillna(df["Age"].mean())
+    bins = (0, 10, 20, 65, 80)
+    group_names = ['Child', 'Teen', 'Adult', 'Senior']
     categories = pd.cut(df.Age, bins, labels=group_names)
     df.Age = categories
     return df
 
-# Get rid of cabin number. Keep only the letter
+# Get rid of cabin number - also ignores multiple cabins
+# Keep only the first letter
+# Fill NaN with 'N'
 def simplify_cabins(df):
     df.Cabin = df.Cabin.fillna('N')
     df.Cabin = df.Cabin.apply(lambda x: x[0])
     return df
 
 # Create bins for fares
+# Treat 0 fare as NaN and replace with mean of corresponding class
 def simplify_fares(df):
-    df.Fare = df.Fare.fillna(-0.5)
-    bins = (-1, 0, 8, 15, 31, 1000)
-    group_names = ['Unknown', '1_quartile', '2_quartile', '3_quartile', '4_quartile']
+    df.Fare = df.Fare.replace(0, np.nan)
+    df.Fare = df.Fare.fillna(df.groupby("Pclass").Fare.transform("mean"))
+    bins = (0, 8, 15, 31, 1000)
+    group_names = ['1_quartile', '2_quartile', '3_quartile', '4_quartile']
     categories = pd.cut(df.Fare, bins, labels=group_names)
     df.Fare = categories
+    return df
+
+# Fill NaNs
+def format_embarked(df):
+    df.Embarked = df.Embarked.fillna(df.Embarked.mode())
     return df
 
 # Split name into prefix ("Mr.", "Mrs.", "Dr.") and last name
@@ -41,21 +51,22 @@ def format_name(df):
     df['NamePrefix'] = df.Name.apply(lambda x: x.split(' ')[1])
     return df
 
-# Drop ticket, name and embarked features
+# Drop ticket, name and port of embarkment features
 def drop_features(df):
-    return df.drop(['Ticket', 'Name', 'Embarked'], axis=1)
+    return df.drop(['Ticket', 'Name'], axis=1)
 
 # Clean data with helper functions
 def transform_features(df):
     df = simplify_ages(df)
     df = simplify_cabins(df)
     df = simplify_fares(df)
+    df = format_embarked(df)
     df = format_name(df)
     df = drop_features(df)
     return df
 
 def encode_features(df_train, df_test):
-    features = ['Fare', 'Cabin', 'Age', 'Sex', 'Lname', 'NamePrefix']
+    features = ['Fare', 'Cabin', 'Age', 'Sex', 'Lname', 'NamePrefix', 'Embarked']
     df_combined = pd.concat([df_train[features], df_test[features]])
 
     for feature in features:
@@ -86,6 +97,7 @@ if __name__ == "__main__":
 
     data_train = pd.read_csv('./data/train.csv')
     data_test = pd.read_csv('./data/test.csv')
+
     data_train = transform_features(data_train)
     data_test = transform_features(data_test)
     data_train, data_test = encode_features(data_train, data_test)
@@ -93,6 +105,7 @@ if __name__ == "__main__":
     X_all = data_train.drop(['Survived', 'PassengerId'], axis=1)
     y_all = data_train['Survived']
 
+    # Split training data into 80% training and 20% testing
     num_test = 0.20
     X_train, X_test, y_train, y_test = train_test_split(X_all, y_all, test_size=num_test, random_state=23)
 
@@ -100,8 +113,7 @@ if __name__ == "__main__":
     clf = RandomForestClassifier()
 
     # Choose some parameter combinations to try
-    parameters = {'n_estimators': [4, 6, 9],
-                  'max_features': ['log2', 'sqrt','auto'],
+    parameters = {'n_estimators': [9, 50, 250],
                   'criterion': ['entropy', 'gini'],
                   'max_depth': [2, 3, 5, 10],
                   'min_samples_split': [2, 3, 5],
