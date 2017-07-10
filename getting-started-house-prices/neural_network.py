@@ -32,8 +32,9 @@ def main():
     valid_size = np.shape(x_valid)[0]
     test_size = np.shape(x_test)[0]
     num_features = np.shape(x_train)[1]
+    num_hidden = 16 # Number of activation units in the hidden layer
 
-    # Linear Regression Graph
+    # Neural network with one hidden layer
     graph = tf.Graph()
     with graph.as_default():
 
@@ -44,22 +45,32 @@ def main():
         tf_test_dataset = tf.constant(x_test)
 
         # Variables
-        weights = tf.Variable(tf.truncated_normal([num_features, 1]), dtype=tf.float32, name="weights")
-        biases = tf.Variable(tf.zeros([1]), dtype=tf.float32, name="biases")
+        weights_1 = tf.Variable(tf.truncated_normal(
+            [num_features, num_hidden]), dtype=tf.float32, name="layer1_weights")
+        biases_1 = tf.Variable(tf.zeros([num_hidden]), dtype=tf.float32, name="layer1_biases")
+        weights_2 = tf.Variable(tf.truncated_normal(
+            [num_hidden, 1]), dtype = tf.float32, name="layer2_weights")
+        biases_2 = tf.Variable(tf.zeros([1]), dtype=tf.float32, name="layer2_biases")
+        steps = tf.Variable(0)
+
+        # Model
+        def model(x, train=False):
+            hidden = tf.nn.relu(tf.matmul(x, weights_1) + biases_1)
+            return tf.matmul(hidden, weights_2) + biases_2
 
         # Loss Computation
-        train_prediction = tf.matmul(tf_train_dataset, weights) + biases
+        train_prediction = model(tf_train_dataset)
         loss = 0.5 * tf.reduce_mean(tf.squared_difference(tf_train_labels, train_prediction))
         cost = tf.sqrt(loss)
 
         # Optimizer
-        # Gradient descent optimizer with learning rate = alpha
-        alpha = tf.constant(0.01, dtype=tf.float64)
-        optimizer = tf.train.GradientDescentOptimizer(alpha).minimize(loss)
+        # Exponential decay of learning rate
+        learning_rate = tf.train.exponential_decay(0.06, steps, 5000, 0.70, staircase=True)
+        optimizer = tf.train.GradientDescentOptimizer(learning_rate).minimize(cost, global_step=steps)
 
         # Predictions
-        valid_prediction = tf.matmul(tf_valid_dataset, weights) + biases
-        test_prediction = tf.matmul(tf_test_dataset, weights) + biases
+        valid_prediction = model(tf_valid_dataset)
+        test_prediction = model(tf_test_dataset)
 
         saver = tf.train.Saver()
 
@@ -73,27 +84,28 @@ def main():
             # arrays.
             _, c, predictions = sess.run([optimizer, cost, train_prediction])
             if (step % 5000 == 0):
-                print('Cost at step %d: %f' % (step, c))
+                print('Cost at step %d: %.2f' % (step, c))
                 # Calling .eval() on valid_prediction is basically like calling run(), but
                 # just to get that one numpy array. Note that it recomputes all its graph
                 # dependencies.
                 print('Validation loss: %.2f' % accuracy(valid_prediction.eval(), y_valid))
         t_pred = test_prediction.eval()
         print('Test loss: %.2f' % accuracy(t_pred, y_test))
-        save_path = saver.save(sess, "./model/linear-model.ckpt")
+        save_path = saver.save(sess, "./model/nn-model.ckpt")
         print('Model saved in %s' % (save_path))
 
-    # Reconstructing model and predicting outputs
+    # Reconstructing graph and predicting outputs
     with tf.Session(graph=graph) as sess:
-        saver.restore(sess, "./model/linear-model.ckpt")
+        saver.restore(sess, "./model/nn-model.ckpt")
         print("Model restored.\nMaking predictions...")
         x = test_dataset.drop('Id', axis=1).as_matrix().astype(dtype=np.float32)
-        y = tf.cast((tf.matmul(x, weights) + biases), dtype=tf.uint16).eval()
+        hidden = tf.nn.relu(tf.matmul(x, weights_1) + biases_1)
+        y = tf.cast((tf.matmul(hidden, weights_2) + biases_2), dtype=tf.uint16).eval()
         test_dataset['SalePrice'] = y
         output = test_dataset[['Id', 'SalePrice']]
 
-    output.to_csv('./submissions/linear-submission.csv', index=False)
-    print("Output saved to ./submissions/linear-submission.csv")
+    output.to_csv('./submissions/nn-submission.csv', index=False)
+    print("Output saved to ./submissions/nn-submission.csv")
 
 if __name__ == "__main__":
-    main()
+    main():
